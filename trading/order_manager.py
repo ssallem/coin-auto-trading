@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from api.upbit_client import OrderResult, UpbitClient
+from sync.supabase_sync import SupabaseSync
 from trading.risk_manager import Position, RiskManager
 from utils.logger import get_logger
 from utils.notifier import get_notifier
@@ -73,6 +74,7 @@ class OrderManager:
         risk_manager: RiskManager,
         per_trade_amount: float = 100_000,
         min_order_amount: float = 5_000,
+        sync: Optional[SupabaseSync] = None,
     ) -> None:
         """
         Args:
@@ -80,11 +82,13 @@ class OrderManager:
             risk_manager: RiskManager 인스턴스
             per_trade_amount: 1회 매수 금액 (KRW)
             min_order_amount: 최소 주문 금액 (KRW, Upbit 최소 5,000원)
+            sync: SupabaseSync 인스턴스 (None이면 동기화 비활성)
         """
         self._client = client
         self._risk_manager = risk_manager
         self._per_trade_amount = per_trade_amount
         self._min_order_amount = min_order_amount
+        self._sync = sync
 
         # 거래 이력 (세션 동안 누적)
         self._trade_history: List[TradeRecord] = []
@@ -223,6 +227,23 @@ class OrderManager:
             reason=reason,
         )
 
+        # 9. Supabase 주문 이력 동기화
+        if self._sync and record:
+            try:
+                self._sync.push_order_history(
+                    upbit_uuid=record.order_uuid,
+                    market=market,
+                    side="bid",
+                    ord_type="price",
+                    price=avg_price,
+                    volume=volume,
+                    amount=amount,
+                    signal_reason=reason,
+                    source="bot",
+                )
+            except Exception as e:
+                logger.warning(f"매수 이력 Supabase 동기화 실패 (무시): {e}")
+
         return record
 
     # ─────────────────────────────────────
@@ -334,6 +355,25 @@ class OrderManager:
             pnl=pnl,
             pnl_pct=pnl_pct,
         )
+
+        # 8. Supabase 주문 이력 동기화
+        if self._sync and record:
+            try:
+                self._sync.push_order_history(
+                    upbit_uuid=record.order_uuid,
+                    market=market,
+                    side="ask",
+                    ord_type="market",
+                    price=avg_price,
+                    volume=sell_volume,
+                    amount=sell_amount,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                    signal_reason=reason,
+                    source="bot",
+                )
+            except Exception as e:
+                logger.warning(f"매도 이력 Supabase 동기화 실패 (무시): {e}")
 
         return record
 

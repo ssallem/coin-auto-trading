@@ -34,6 +34,7 @@ from strategies.base_strategy import BaseStrategy, Signal, SignalResult
 from strategies.bollinger_strategy import BollingerStrategy
 from strategies.ma_cross_strategy import MACrossStrategy
 from strategies.rsi_strategy import RSIStrategy
+from sync.supabase_sync import SupabaseSync
 from trading.order_manager import OrderManager
 from trading.risk_manager import RiskManager
 from utils.logger import get_logger
@@ -88,6 +89,9 @@ class TradingEngine:
             logger.critical(f"API 키 오류: {e}")
             raise RuntimeError(f"Upbit API 키를 확인하세요: {e}") from e
 
+        # ── Supabase 동기화 초기화 ──
+        self._sync = SupabaseSync()
+
         # ── 리스크 관리자 초기화 ──
         self._risk_manager = RiskManager(
             stop_loss_pct=settings.risk.stop_loss_pct,
@@ -105,6 +109,7 @@ class TradingEngine:
             risk_manager=self._risk_manager,
             per_trade_amount=settings.investment.per_trade_amount,
             min_order_amount=settings.investment.min_order_amount,
+            sync=self._sync,
         )
 
         # ── 데이터 수집기 초기화 ──
@@ -306,6 +311,10 @@ class TradingEngine:
                             f"{type(e).__name__}: {e}"
                         )
 
+            # ── Supabase 동기화 ──
+            self._sync_account_if_needed()
+            self._process_pending_orders()
+
             logger.debug(f"--- 사이클 #{self._cycle_count} 완료 ---")
 
         except Exception as e:
@@ -412,6 +421,147 @@ class TradingEngine:
                 )
                 if record and self._strategy:
                     self._strategy.on_position_closed(market, record.pnl_pct)
+
+    # ─────────────────────────────────────
+    # Supabase 동기화
+    # ─────────────────────────────────────
+
+    def _sync_account_if_needed(self) -> None:
+        """
+        계좌 잔고를 조회하여 Supabase에 스냅샷을 전송한다.
+
+        push_account_snapshot 내부에서 30초 주기를 관리하므로
+        매 사이클 호출해도 과도한 전송은 발생하지 않는다.
+        동기화 실패 시에도 매매 로직에 영향을 주지 않는다.
+        """
+        if not self._sync.enabled:
+            return
+
+        try:
+            balances = self._client.get_balances()
+
+            krw_balance = 0.0
+            krw_locked = 0.0
+            holdings = []
+
+            for b in balances:
+                if b.currency == "KRW":
+                    krw_balance = b.balance
+                    krw_locked = b.locked
+                else:
+                    holdings.append({
+                        "currency": b.currency,
+                        "balance": str(b.balance),
+                        "locked": str(b.locked),
+                        "avg_buy_price": str(b.avg_buy_price),
+                        "unit_currency": b.unit_currency,
+                    })
+
+            self._sync.push_account_snapshot(
+                krw_balance=krw_balance,
+                krw_locked=krw_locked,
+                holdings=holdings,
+            )
+        except Exception as e:
+            logger.debug(f"계좌 동기화 실패 (무시): {e}")
+
+    def _process_pending_orders(self) -> None:
+        """
+        웹 대시보드에서 생성된 대기 주문을 조회하고 실행한다.
+
+        각 주문의 side/ord_type 조합에 따라 적절한 API를 호출한다:
+          - bid + price  : 시장가 매수 (금액 지정)
+          - ask + market : 시장가 매도 (수량 지정)
+          - bid + limit  : 지정가 매수
+          - ask + limit  : 지정가 매도
+
+        실행 결과에 따라 pending_orders 상태를 갱신하고
+        order_history에 이력을 기록한다.
+        """
+        if not self._sync.enabled:
+            return
+
+        try:
+            pending = self._sync.fetch_pending_orders()
+        except Exception as e:
+            logger.debug(f"대기 주문 조회 실패 (무시): {e}")
+            return
+
+        for order in pending:
+            order_id = order.get("id")
+            market = order.get("market", "")
+            side = order.get("side", "")
+            ord_type = order.get("ord_type", "")
+            price = order.get("price")
+            volume = order.get("volume")
+
+            try:
+                self._sync.mark_pending_processing(order_id)
+
+                order_result = None
+
+                if side == "bid" and ord_type == "price":
+                    # 시장가 매수 (금액 지정)
+                    order_result = self._client.buy_market_order(
+                        market, float(price)
+                    )
+                elif side == "ask" and ord_type == "market":
+                    # 시장가 매도 (수량 지정)
+                    order_result = self._client.sell_market_order(
+                        market, float(volume)
+                    )
+                elif side == "bid" and ord_type == "limit":
+                    # 지정가 매수
+                    order_result = self._client.buy_limit_order(
+                        market, float(price), float(volume)
+                    )
+                elif side == "ask" and ord_type == "limit":
+                    # 지정가 매도
+                    order_result = self._client.sell_limit_order(
+                        market, float(price), float(volume)
+                    )
+                else:
+                    raise ValueError(
+                        f"지원하지 않는 주문 유형: side={side}, ord_type={ord_type}"
+                    )
+
+                if order_result is None:
+                    raise RuntimeError("주문 API가 None을 반환했습니다.")
+
+                # 성공
+                self._sync.mark_pending_done(order_id, order_result.uuid)
+
+                # bid+price: 주문 금액이 곧 amount
+                if side == "bid":
+                    amount_val = float(price) if price else 0.0
+                # ask: 체결 후 현재가 * 수량으로 추정 (정확한 체결가는 알 수 없음)
+                else:
+                    current_price = self._client.get_current_price(market)
+                    amount_val = float(volume) * current_price if current_price and volume else 0.0
+
+                self._sync.push_order_history(
+                    upbit_uuid=order_result.uuid,
+                    market=market,
+                    side=side,
+                    ord_type=ord_type,
+                    price=float(price) if price else 0.0,
+                    volume=float(volume) if volume else 0.0,
+                    amount=amount_val,
+                    source="web",
+                    pending_order_id=order_id,
+                )
+
+                logger.info(
+                    f"대기 주문 #{order_id} 실행 완료: "
+                    f"{market} {side} {ord_type}"
+                )
+
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {e}"
+                self._sync.mark_pending_failed(order_id, error_msg)
+                logger.warning(
+                    f"대기 주문 #{order_id} 실행 실패: {error_msg}"
+                )
 
     # ─────────────────────────────────────
     # 요약 출력
