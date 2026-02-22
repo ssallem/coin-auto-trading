@@ -21,6 +21,9 @@ python-dotenv==1.0.1
 # ── WebSocket (실시간 시세 수신) ──
 websockets==13.1
 
+# ── HTTP 요청 (Supabase REST API 등) ──
+requests>=2.31.0
+
 # ── 개발/테스트 도구 ──
 pytest==8.3.4
 pytest-asyncio==0.24.0

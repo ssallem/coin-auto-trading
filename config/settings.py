@@ -156,9 +156,15 @@ class Settings:
         self.telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
         self.slack_webhook_url: str = os.getenv("SLACK_WEBHOOK_URL", "")
 
-        # ── config.yaml 로드 ──
-        config_path = PROJECT_ROOT / "config" / "config.yaml"
-        raw: Dict[str, Any] = self._load_yaml(config_path)
+        # ── 설정 로드: Supabase 우선, yaml fallback ──
+        raw: Optional[Dict[str, Any]] = None
+        raw = self._load_from_supabase()
+        if raw is None:
+            print("[정보] Supabase 미설정 또는 로드 실패, config.yaml로 폴백합니다.")
+            config_path = PROJECT_ROOT / "config" / "config.yaml"
+            raw = self._load_yaml(config_path)
+        else:
+            print("[정보] Supabase에서 설정을 로드했습니다.")
 
         # ── 각 섹션을 dataclass 인스턴스로 매핑 ──
         self.trading = self._load_dataclass(
@@ -217,6 +223,19 @@ class Settings:
     def reset(cls) -> None:
         """싱글턴 인스턴스를 초기화한다 (주로 테스트용)."""
         cls._instance = None
+
+    # ─────────────────────────────────────────
+    # Supabase 로드
+    # ─────────────────────────────────────────
+
+    @staticmethod
+    def _load_from_supabase() -> Optional[Dict[str, Any]]:
+        """Supabase에서 설정을 로드한다. 실패 시 None."""
+        try:
+            from config.supabase_loader import load_config_from_supabase
+            return load_config_from_supabase()
+        except ImportError:
+            return None
 
     # ─────────────────────────────────────────
     # YAML 로드
