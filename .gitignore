@@ -1,0 +1,39 @@
+# 환경 변수 (API 키 등 민감 정보)
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 로그
+logs/
+*.log
+
+# 테스트/캐시
+.pytest_cache/
+
+# 도구 설정
+.claude/
+.serena/
+
+# OS
+.DS_Store
+Thumbs.db
