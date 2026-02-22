@@ -173,8 +173,15 @@ class Settings:
         self.investment = self._load_dataclass(
             InvestmentConfig, raw.get("investment", {})
         )
+
+        # risk 섹션 특별 처리 (Supabase 중첩 구조 → dataclass 플랫 구조)
+        risk_raw = dict(raw.get("risk", {}))
+        trailing_raw = risk_raw.pop("trailing_stop", {})
+        if trailing_raw and isinstance(trailing_raw, dict):
+            risk_raw["trailing_stop_enabled"] = trailing_raw.get("enabled", False)
+            risk_raw["trailing_stop_pct"] = trailing_raw.get("pct", 2.0)
         self.risk = self._load_dataclass(
-            RiskConfig, raw.get("risk", {})
+            RiskConfig, risk_raw
         )
         self.backtest = self._load_dataclass(
             BacktestConfig, raw.get("backtest", {})
