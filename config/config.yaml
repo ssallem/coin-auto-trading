@@ -52,7 +52,7 @@ risk:
 # 전략 설정
 # -------------------------------------------------------------
 strategy:
-  # 활성 전략 이름 ("rsi", "ma_cross", "bollinger", "combined")
+  # 활성 전략 이름 ("rsi", "ma_cross", "bollinger", "ross_cameron")
   active: "rsi"
 
   # RSI 전략 파라미터
@@ -72,6 +72,23 @@ strategy:
     period: 20           # 볼린저밴드 기간
     std_dev: 2.0         # 표준편차 배수
     # 하단밴드 이탈 시 매수, 상단밴드 이탈 시 매도
+
+  # 로스 카메론 전략 파라미터
+  ross_cameron:
+    rsi_period: 14                # RSI 계산 기간
+    rsi_neutral_min: 40           # RSI 중립 하한
+    rsi_neutral_max: 60           # RSI 중립 상한
+    enable_strategy_a: true       # 전략 A 활성화 (더블 바닥/탑 + 볼린저밴드)
+    bb_period: 20                 # 볼린저밴드 기간
+    bb_std_dev: 2.0               # 볼린저밴드 표준편차 배수
+    double_pattern_window: 30     # 더블 패턴 탐지 윈도우
+    enable_strategy_b: true       # 전략 B 활성화 (다이버전스 + MACD)
+    divergence_window: 50         # 다이버전스 탐지 윈도우
+    macd_fast: 12                 # MACD 빠른 이동평균 기간
+    macd_slow: 26                 # MACD 느린 이동평균 기간
+    macd_signal_period: 9         # MACD 시그널 기간
+    buy_risk_reward_ratio: 2.0    # 매수 시 리스크/보상 비율
+    sell_risk_reward_ratio: 1.0   # 매도 시 리스크/보상 비율
 
 # -------------------------------------------------------------
 # 백테스팅 설정

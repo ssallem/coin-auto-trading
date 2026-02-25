@@ -84,12 +84,32 @@ class BollingerStrategyConfig:
 
 
 @dataclass
+class RossCameronStrategyConfig:
+    """로스 카메론 전략 파라미터"""
+    rsi_period: int = 14
+    rsi_neutral_min: int = 40
+    rsi_neutral_max: int = 60
+    enable_strategy_a: bool = True
+    bb_period: int = 20
+    bb_std_dev: float = 2.0
+    double_pattern_window: int = 30
+    enable_strategy_b: bool = True
+    divergence_window: int = 50
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal_period: int = 9
+    buy_risk_reward_ratio: float = 2.0
+    sell_risk_reward_ratio: float = 1.0
+
+
+@dataclass
 class StrategyConfig:
     """전략 설정"""
     active: str = "rsi"
     rsi: RSIStrategyConfig = field(default_factory=RSIStrategyConfig)
     ma_cross: MACrossStrategyConfig = field(default_factory=MACrossStrategyConfig)
     bollinger: BollingerStrategyConfig = field(default_factory=BollingerStrategyConfig)
+    ross_cameron: RossCameronStrategyConfig = field(default_factory=RossCameronStrategyConfig)
 
 
 @dataclass
@@ -205,6 +225,9 @@ class Settings:
             ),
             bollinger=self._load_dataclass(
                 BollingerStrategyConfig, strat_raw.get("bollinger", {})
+            ),
+            ross_cameron=self._load_dataclass(
+                RossCameronStrategyConfig, strat_raw.get("ross_cameron", {})
             ),
         )
 
@@ -359,7 +382,7 @@ class Settings:
             )
 
         # ── 전략 검증 ──
-        valid_strategies = {"rsi", "ma_cross", "bollinger"}
+        valid_strategies = {"rsi", "ma_cross", "bollinger", "ross_cameron"}
         if self.strategy.active not in valid_strategies:
             errors.append(
                 f"[설정 오류] 알 수 없는 전략: '{self.strategy.active}'. "

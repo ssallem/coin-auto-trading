@@ -160,7 +160,7 @@ class RSIStrategy(BaseStrategy):
             )
 
         # ── 관망: 중립 구간 ──
-        logger.debug(
+        logger.info(
             "[%s] RSI 관망: %.1f (%d~%d 사이)",
             market,
             current_rsi,
