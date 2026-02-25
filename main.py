@@ -67,6 +67,25 @@ def create_strategy(settings: Settings, strategy_name: str | None = None):
             period=settings.strategy.bollinger.period,
             std_dev=settings.strategy.bollinger.std_dev,
         )
+    elif active == "ross_cameron":
+        from strategies.ross_cameron_strategy import RossCameronStrategy
+        cfg = settings.strategy.ross_cameron
+        return RossCameronStrategy(
+            rsi_period=cfg.rsi_period,
+            rsi_neutral_min=cfg.rsi_neutral_min,
+            rsi_neutral_max=cfg.rsi_neutral_max,
+            enable_strategy_a=cfg.enable_strategy_a,
+            bb_period=cfg.bb_period,
+            bb_std_dev=cfg.bb_std_dev,
+            double_pattern_window=cfg.double_pattern_window,
+            enable_strategy_b=cfg.enable_strategy_b,
+            divergence_window=cfg.divergence_window,
+            macd_fast=cfg.macd_fast,
+            macd_slow=cfg.macd_slow,
+            macd_signal_period=cfg.macd_signal_period,
+            buy_risk_reward_ratio=cfg.buy_risk_reward_ratio,
+            sell_risk_reward_ratio=cfg.sell_risk_reward_ratio,
+        )
     else:
         raise ValueError(f"알 수 없는 전략: {active}")
 
