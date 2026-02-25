@@ -22,11 +22,11 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 
-from api.upbit_client import UpbitClient
+from api.upbit_client import Balance, UpbitClient
 from config.settings import Settings
 from data.collector import DataCollector
 from data.indicators import Indicators
@@ -123,12 +123,99 @@ class TradingEngine:
         # ── 전략은 run() 호출 시 lazy initialization ──
         self._strategy: Optional[BaseStrategy] = None
 
+        # ── 기존 보유 포지션 로드 (재시작 시 복구) ──
+        self._load_existing_positions()
+
         logger.info(
             f"TradingEngine 초기화 완료: "
             f"전략=미설정 (run 시 자동 선택), "
             f"마켓={settings.trading.markets}, "
             f"폴링간격={settings.trading.poll_interval}초"
         )
+
+    # ─────────────────────────────────────
+    # 포지션 복구
+    # ─────────────────────────────────────
+
+    def _load_existing_positions(self) -> None:
+        """
+        Upbit API에서 현재 보유 중인 코인을 조회하여 RiskManager에 자동 등록한다.
+
+        봇 재시작 시 메모리에서 사라진 포지션을 복구하여,
+        실제 보유 자산과 봇의 인식 상태를 동기화한다.
+
+        처리 로직:
+          1. get_balances()로 전체 잔고 조회
+          2. KRW가 아닌 코인(balance > 0)을 필터링
+          3. 각 코인을 "KRW-{currency}" 마켓 코드로 변환
+          4. avg_buy_price를 entry_price로 사용
+          5. RiskManager.register_position() 호출
+
+        에러 발생 시에도 봇 초기화는 계속 진행한다.
+        """
+        try:
+            logger.info("기존 보유 포지션 로드 시작...")
+            balances = self._client.get_balances()
+
+            loaded_count = 0
+            for balance in balances:
+                # KRW는 스킵
+                if balance.currency == "KRW":
+                    continue
+
+                # 보유 수량이 0보다 큰 코인만 처리
+                if balance.balance <= 0:
+                    continue
+
+                # 마켓 코드 생성 (예: BTC → KRW-BTC)
+                market = f"KRW-{balance.currency}"
+
+                # avg_buy_price가 0인 경우 현재가로 폴백
+                entry_price = balance.avg_buy_price
+                if entry_price <= 0:
+                    logger.warning(
+                        f"{market}: avg_buy_price가 0 또는 음수 "
+                        f"({entry_price}), 현재가로 대체 시도"
+                    )
+                    current_price = self._client.get_current_price(market)
+                    if current_price and current_price > 0:
+                        entry_price = current_price
+                        logger.info(
+                            f"{market}: 현재가 {entry_price:,.0f}를 "
+                            f"entry_price로 사용"
+                        )
+                    else:
+                        logger.error(
+                            f"{market}: 현재가 조회 실패, 포지션 등록 스킵"
+                        )
+                        continue
+
+                # 매수 총 금액 계산
+                entry_amount = entry_price * balance.balance
+
+                # RiskManager에 포지션 등록
+                self._risk_manager.register_position(
+                    market=market,
+                    entry_price=entry_price,
+                    volume=balance.balance,
+                    entry_amount=entry_amount,
+                    entry_time=datetime.now(),  # 정확한 매수 시각은 알 수 없으므로 현재 시각 사용
+                )
+                loaded_count += 1
+
+            if loaded_count > 0:
+                logger.info(
+                    f"기존 포지션 로드 완료: {loaded_count}개 포지션 복구됨"
+                )
+            else:
+                logger.info("기존 포지션 없음 (또는 KRW만 보유)")
+
+        except Exception as e:
+            logger.error(
+                f"기존 포지션 로드 실패 (봇은 계속 실행됨): "
+                f"{type(e).__name__}: {e}",
+                exc_info=True,
+            )
 
     # ─────────────────────────────────────
     # 전략 관리

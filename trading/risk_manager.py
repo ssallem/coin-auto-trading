@@ -177,6 +177,33 @@ class RiskManager:
     # 포지션 관리
     # ─────────────────────────────────────
 
+    def register_position(
+        self,
+        market: str,
+        entry_price: float,
+        volume: float,
+        entry_amount: float,
+        entry_time: Optional[datetime] = None,
+    ) -> None:
+        """
+        포지션을 등록한다. (헬퍼 메서드)
+
+        Args:
+            market: 마켓 코드
+            entry_price: 매수 평균가
+            volume: 보유 수량
+            entry_amount: 매수 총 금액
+            entry_time: 매수 시각 (None이면 현재 시각)
+        """
+        position = Position(
+            market=market,
+            entry_price=entry_price,
+            volume=volume,
+            entry_amount=entry_amount,
+            entry_time=entry_time or datetime.now(),
+        )
+        self.add_position(position)
+
     def add_position(self, position: Position) -> None:
         """
         새 포지션을 등록한다.
