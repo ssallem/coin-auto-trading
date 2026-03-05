@@ -13,10 +13,36 @@ trading:
   markets:
     - KRW-BTC
     - KRW-ETH
+    - KRW-XRP
+    - KRW-SOL
+    - KRW-DOGE
+    - KRW-ADA
+    - KRW-AVAX
+    - KRW-LINK
+    - KRW-DOT
+    - KRW-TRX
+    - KRW-ATOM
+    - KRW-ETC
+    - KRW-XLM
+    - KRW-ALGO
+    - KRW-NEAR
+    - KRW-APT
+    - KRW-ARB
+    - KRW-OP
+    - KRW-SAND
+    - KRW-MANA
+    - KRW-AXS
+    - KRW-HBAR
+    - KRW-BTT
+    - KRW-SUI
+    - KRW-SEI
+    - KRW-STX
+    - KRW-USDC
+    - KRW-SHIB
   # 시세 조회 간격 (초) - 메인 루프 대기 시간
-  poll_interval: 60
+  poll_interval: 180
   # 캔들 기준 시간프레임 ("minute1", "minute5", "minute15", "minute60", "day")
-  timeframe: "minute60"
+  timeframe: "minute15"
   # 캔들 조회 개수 (지표 계산에 필요한 과거 데이터 수)
   candle_count: 200
 
@@ -25,9 +51,9 @@ trading:
 # -------------------------------------------------------------
 investment:
   # 총 투자 가능 금액 (KRW)
-  max_total_investment: 1000000
+  max_total_investment: 200000
   # 1회 매수 금액 (KRW)
-  per_trade_amount: 100000
+  per_trade_amount: 50000
   # 최소 주문 금액 (Upbit 최소 주문: 5,000 KRW)
   min_order_amount: 5000
 
@@ -42,9 +68,9 @@ risk:
   # 일일 최대 손실 금액 (KRW) - 이 금액 초과 시 당일 거래 중단
   max_daily_loss: 50000
   # 최대 동시 보유 종목 수
-  max_positions: 3
+  max_positions: 10
   # 트레일링 스탑 사용 여부
-  trailing_stop_enabled: false
+  trailing_stop_enabled: true
   # 트레일링 스탑 비율 (%) - 고점 대비 이 비율 하락 시 매도
   trailing_stop_pct: 2.0
 
@@ -53,7 +79,7 @@ risk:
 # -------------------------------------------------------------
 strategy:
   # 활성 전략 이름 ("rsi", "ma_cross", "bollinger", "ross_cameron")
-  active: "rsi"
+  active: "ross_cameron"
 
   # RSI 전략 파라미터
   rsi:

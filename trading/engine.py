@@ -76,6 +76,9 @@ class TradingEngine:
         # 사이클 카운터
         self._cycle_count = 0
 
+        # 매수 후보 수집용 리스트 (사이클마다 초기화)
+        self._buy_candidates: List[Dict] = []
+
         # ── Notifier 초기화 ──
         init_notifier(settings)
 
@@ -400,6 +403,9 @@ class TradingEngine:
         try:
             logger.debug(f"--- 사이클 #{self._cycle_count} 시작 ---")
 
+            # 매수 후보 리스트 초기화
+            self._buy_candidates = []
+
             for market in self._settings.trading.markets:
                 try:
                     self._process_market(market)
@@ -420,6 +426,7 @@ class TradingEngine:
             # ── Supabase 동기화 ──
             self._sync_account_if_needed()
             self._process_pending_orders()
+            self._sync_buy_candidates()
 
             logger.debug(f"--- 사이클 #{self._cycle_count} 완료 ---")
 
@@ -508,6 +515,9 @@ class TradingEngine:
             f"사유: {signal_result.reason}"
         )
 
+        # 5-1. 분석 결과를 매수 후보 리스트에 추가
+        self._collect_buy_candidate(signal_result, current_price, df)
+
         # 6. 신호에 따른 매매 실행
         if signal_result.signal == Signal.BUY:
             record = self._order_manager.execute_buy(
@@ -529,8 +539,82 @@ class TradingEngine:
                     self._strategy.on_position_closed(market, record.pnl_pct)
 
     # ─────────────────────────────────────
+    # 매수 후보 수집 및 동기화
+    # ─────────────────────────────────────
+
+    def _collect_buy_candidate(
+        self, signal_result: SignalResult, current_price: float, df: pd.DataFrame
+    ) -> None:
+        """
+        전략 분석 결과를 매수 후보 리스트에 추가한다.
+
+        Args:
+            signal_result: 전략 분석 결과
+            current_price: 현재가
+            df: 기술적 지표가 포함된 DataFrame
+        """
+        try:
+            # RSI 값 추출 (있는 경우)
+            rsi_value = None
+            if not df.empty and "rsi" in df.columns:
+                rsi_value = float(df["rsi"].iloc[-1])
+
+            # indicators 요약 생성
+            indicators = {}
+            if not df.empty:
+                # 주요 지표만 포함
+                indicator_columns = ["rsi", "sma_short", "sma_long", "bb_upper", "bb_lower", "macd", "macd_signal"]
+                for col in indicator_columns:
+                    if col in df.columns:
+                        val = df[col].iloc[-1]
+                        if pd.notna(val):
+                            indicators[col] = float(val)
+
+            # metadata에서 추가 정보 추출
+            if signal_result.metadata:
+                indicators.update(signal_result.metadata)
+
+            candidate = {
+                "market": signal_result.market,
+                "signal": signal_result.signal.value,
+                "confidence": signal_result.confidence,
+                "reason": signal_result.reason,
+                "current_price": current_price,
+                "rsi": rsi_value,
+                "indicators": indicators,
+                "analyzed_at": datetime.now().isoformat(),
+            }
+
+            self._buy_candidates.append(candidate)
+            logger.debug(
+                f"[{signal_result.market}] 매수 후보 수집: "
+                f"{signal_result.signal.value} (확신도: {signal_result.confidence:.2f})"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"[{signal_result.market}] 매수 후보 수집 실패 (무시): {e}"
+            )
+
+    # ─────────────────────────────────────
     # Supabase 동기화
     # ─────────────────────────────────────
+
+    def _sync_buy_candidates(self) -> None:
+        """
+        수집된 매수 후보 리스트를 Supabase에 동기화한다.
+
+        사이클마다 전체 매수 후보를 교체하여 웹 대시보드에서
+        최신 분석 결과를 조회할 수 있도록 한다.
+        동기화 실패 시에도 매매 로직에 영향을 주지 않는다.
+        """
+        if not self._sync.enabled:
+            return
+
+        try:
+            self._sync.push_buy_candidates(self._buy_candidates)
+        except Exception as e:
+            logger.warning(f"매수 후보 동기화 실패 (무시): {e}")
 
     def _sync_account_if_needed(self) -> None:
         """

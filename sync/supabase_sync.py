@@ -44,6 +44,7 @@ class SupabaseSync:
     def __init__(self) -> None:
         self._url = os.getenv("SUPABASE_URL", "")
         self._key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        self._bot_id = "main"
         self._last_snapshot_time: float = 0.0
 
         if self._url and self._key:
@@ -296,3 +297,77 @@ class SupabaseSync:
             logger.warning(
                 f"대기 주문 #{order_id} 상태 변경 실패 (무시): {e}"
             )
+
+    # ─────────────────────────────────────
+    # 매수 후보 (buy_candidates)
+    # ─────────────────────────────────────
+
+    def push_buy_candidates(self, candidates: List[Dict[str, Any]]) -> bool:
+        """
+        buy_candidates 테이블에 전략 분석 결과를 업로드한다.
+
+        매 사이클마다 기존 bot_id 데이터를 삭제하고 새로운 분석 결과로 교체한다.
+        웹 대시보드에서 현재 매수 후보 목록을 조회할 수 있도록 한다.
+
+        Args:
+            candidates: 매수 후보 리스트
+                [{"market": "KRW-BTC", "signal": "BUY", "confidence": 0.8,
+                  "reason": "...", "current_price": 50000000, "rsi": 30.5,
+                  "indicators": {...}, "analyzed_at": "2024-01-01T00:00:00Z"}]
+
+        Returns:
+            성공 시 True, 실패 시 False
+        """
+        if not self.enabled:
+            return False
+
+        if not candidates:
+            logger.debug("매수 후보 없음, 스킵")
+            return True
+
+        try:
+            # 1. 새 데이터 먼저 삽입 (analyzed_at에 현재 시각 기록)
+            current_time = datetime.now(timezone.utc).isoformat()
+            payload = []
+            for candidate in candidates:
+                row = {
+                    "bot_id": self._bot_id,
+                    "market": candidate.get("market", ""),
+                    "signal": candidate.get("signal", "HOLD"),
+                    "confidence": candidate.get("confidence", 0.0),
+                    "reason": candidate.get("reason", ""),
+                    "current_price": candidate.get("current_price", 0.0),
+                    "rsi": candidate.get("rsi"),
+                    "indicators": candidate.get("indicators", {}),
+                    "analyzed_at": current_time,
+                }
+                payload.append(row)
+
+            insert_resp = requests.post(
+                f"{self._url}/rest/v1/buy_candidates",
+                headers=self._headers(),
+                json=payload,
+                timeout=10,
+            )
+            insert_resp.raise_for_status()
+            logger.debug(f"새 매수 후보 {len(payload)}건 삽입 완료")
+
+            # 2. 오래된 데이터만 삭제 (analyzed_at < current_time인 것만)
+            delete_resp = requests.delete(
+                f"{self._url}/rest/v1/buy_candidates",
+                headers=self._headers(),
+                params={
+                    "bot_id": f"eq.{self._bot_id}",
+                    "analyzed_at": f"lt.{current_time}"
+                },
+                timeout=10,
+            )
+            delete_resp.raise_for_status()
+            logger.info(
+                f"매수 후보 {len(payload)}건 업로드 완료 (bot_id={self._bot_id})"
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(f"매수 후보 업로드 실패 (무시): {e}")
+            return False

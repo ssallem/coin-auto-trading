@@ -246,6 +246,38 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 
 # ─────────────────────────────────────────────
+# 서브커맨드: sync-config
+# ─────────────────────────────────────────────
+
+def cmd_sync_config(args: argparse.Namespace) -> None:
+    """config.yaml을 Supabase bot_config 테이블에 동기화한다."""
+    try:
+        # scripts/update_supabase_config.py 실행
+        import subprocess
+        script_path = os.path.join(_PROJECT_ROOT, "scripts", "update_supabase_config.py")
+
+        if not os.path.exists(script_path):
+            print(
+                f"[오류] 스크립트를 찾을 수 없습니다: {script_path}",
+                file=sys.stderr
+            )
+            sys.exit(1)
+
+        # Python 스크립트 실행
+        result = subprocess.run(
+            [sys.executable, script_path],
+            cwd=_PROJECT_ROOT,
+        )
+
+        sys.exit(result.returncode)
+
+    except Exception as e:
+        print(f"[오류] 설정 동기화 실패: {e}", file=sys.stderr)
+        traceback.print_exc()
+        sys.exit(1)
+
+
+# ─────────────────────────────────────────────
 # 서브커맨드: check
 # ─────────────────────────────────────────────
 
@@ -409,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy",
         type=str,
         default=None,
-        choices=["rsi", "ma_cross", "bollinger"],
+        choices=["rsi", "ma_cross", "bollinger", "ross_cameron"],
         help="사용할 전략 (기본: config에서 읽음)",
     )
     bt_parser.add_argument(
@@ -427,6 +459,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="설정 파일의 유효성을 검증하고, Upbit API 키의 정상 동작 여부를 테스트합니다.",
     )
     check_parser.set_defaults(func=cmd_check)
+
+    # ── sync-config 서브커맨드 ──
+    sync_parser = subparsers.add_parser(
+        "sync-config",
+        help="config.yaml을 Supabase에 동기화합니다",
+        description="config.yaml의 설정을 읽어 Supabase bot_config 테이블에 업데이트합니다.",
+    )
+    sync_parser.set_defaults(func=cmd_sync_config)
 
     return parser
 
