@@ -11,7 +11,7 @@ OR 로직 기반으로 여러 독립적인 진입 신호 중 하나라도 충족
   4. 거래량 급증: 양봉 1.5x 이상 또는 음봉 2.25x 이상 (패닉셀 감지)
   5. 연속 하락 둔화: 3봉 연속 음봉 + 하락폭 30% 이상 축소
 
-매도 조건 (하나만 충족해도 매도):
+매도 조건 (최소 2개 충족 시 매도):
   1. RSI 과매수: RSI > overbought 자체가 매도 신호
   2. EMA 데드크로스 또는 갭 축소: 하향 돌파 또는 상승 갭이 40% 이상 축소
   3. 볼린저 상단 터치: 현재 봉의 고가가 상단 밴드 이상
@@ -218,7 +218,19 @@ class ScalpingStrategy(BaseStrategy):
                     metadata=metadata,
                 )
             elif len(sell_reasons) > len(buy_reasons):
-                # 매도 조건이 더 많으면 매도 (매도는 최소 조건 필터 없음)
+                # 매도 조건이 더 많으면 매도 (최소 2개 필터 적용)
+                if len(sell_reasons) < 2:
+                    logger.info(
+                        "[%s] 매도 조건 부족 (최소 2개 필요, 현재 %d개). HOLD.",
+                        market, len(sell_reasons),
+                    )
+                    return SignalResult(
+                        signal=Signal.HOLD,
+                        market=market,
+                        confidence=0.0,
+                        reason=f"매수/매도 동시 충족, 매도 조건 부족 ({len(sell_reasons)}개 < 2)",
+                        metadata=metadata,
+                    )
                 count = len(sell_reasons)
                 confidence = _CONFIDENCE_MAP.get(count, 0.95)
                 reason = f"스캘핑 매도 ({count}개 조건): " + " | ".join(sell_reasons)
@@ -282,6 +294,19 @@ class ScalpingStrategy(BaseStrategy):
             )
 
         if sell_reasons:
+            # 매도 최소 2개 조건 필터
+            if len(sell_reasons) < 2:
+                logger.info(
+                    "[%s] 매도 조건 부족 (최소 2개 필요, 현재 %d개). HOLD.",
+                    market, len(sell_reasons),
+                )
+                return SignalResult(
+                    signal=Signal.HOLD,
+                    market=market,
+                    confidence=0.0,
+                    reason=f"매도 조건 부족 ({len(sell_reasons)}개 < 2)",
+                    metadata=metadata,
+                )
             count = len(sell_reasons)
             confidence = _CONFIDENCE_MAP.get(count, 0.95)
             reason = f"스캘핑 매도 ({count}개 조건): " + " | ".join(sell_reasons)

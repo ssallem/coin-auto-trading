@@ -76,6 +76,9 @@ class TradingEngine:
         # 사이클 카운터
         self._cycle_count = 0
 
+        # 설정 리로드 타이머
+        self._last_config_reload = 0.0
+
         # 매수 후보 수집용 리스트 (사이클마다 초기화)
         self._buy_candidates: List[Dict] = []
 
@@ -218,6 +221,93 @@ class TradingEngine:
                 f"기존 포지션 로드 실패 (봇은 계속 실행됨): "
                 f"{type(e).__name__}: {e}",
                 exc_info=True,
+            )
+
+    # ─────────────────────────────────────
+    # 설정 리로드
+    # ─────────────────────────────────────
+
+    def _reload_settings_if_changed(self) -> None:
+        """
+        Supabase에서 설정을 주기적으로 리로드하여 RiskManager 파라미터를 갱신한다.
+
+        poll_interval(60초)과 동일한 간격으로만 체크하며,
+        변경된 항목이 있을 때만 RiskManager에 반영하고 로그를 출력한다.
+        예외 발생 시 warning 로그 후 계속 진행 (봇 중단 방지).
+        """
+        try:
+            now = time.time()
+            interval = self._settings.trading.poll_interval
+            if now - self._last_config_reload < interval:
+                return
+            self._last_config_reload = now
+
+            # 이전 리스크 설정 스냅샷
+            old_stop_loss = self._risk_manager._stop_loss_pct
+            old_take_profit = self._risk_manager._take_profit_pct
+            old_trailing_enabled = self._risk_manager._trailing_stop_enabled
+            old_trailing_pct = self._risk_manager._trailing_stop_pct
+
+            # 싱글턴 캐시 무효화 후 리로드
+            new_settings = Settings.load(force_reload=True)
+
+            # 유효성 검증 (실패 시 기존 설정 유지)
+            try:
+                validation_errors = new_settings.validate()
+                if validation_errors:
+                    logger.warning(
+                        f"리로드된 설정 유효성 검증 실패 (기존 설정 유지): "
+                        f"{validation_errors}"
+                    )
+                    return
+            except Exception as ve:
+                logger.warning(
+                    f"설정 유효성 검증 중 예외 (기존 설정 유지): "
+                    f"{type(ve).__name__}: {ve}"
+                )
+                return
+
+            # 새 리스크 설정
+            new_stop_loss = new_settings.risk.stop_loss_pct
+            new_take_profit = new_settings.risk.take_profit_pct
+            new_trailing_enabled = new_settings.risk.trailing_stop_enabled
+            new_trailing_pct = new_settings.risk.trailing_stop_pct
+
+            # 변경 여부 확인
+            changes = []
+            if old_stop_loss != new_stop_loss:
+                changes.append(
+                    f"stop_loss_pct: {old_stop_loss}% → {new_stop_loss}%"
+                )
+                self._risk_manager._stop_loss_pct = new_stop_loss
+            if old_take_profit != new_take_profit:
+                changes.append(
+                    f"take_profit_pct: {old_take_profit}% → {new_take_profit}%"
+                )
+                self._risk_manager._take_profit_pct = new_take_profit
+            if old_trailing_enabled != new_trailing_enabled:
+                changes.append(
+                    f"trailing_stop_enabled: {old_trailing_enabled} → {new_trailing_enabled}"
+                )
+                self._risk_manager._trailing_stop_enabled = new_trailing_enabled
+            if old_trailing_pct != new_trailing_pct:
+                changes.append(
+                    f"trailing_stop_pct: {old_trailing_pct}% → {new_trailing_pct}%"
+                )
+                self._risk_manager._trailing_stop_pct = new_trailing_pct
+
+            if changes:
+                logger.info(
+                    f"[설정 리로드] 리스크 파라미터 변경 감지: "
+                    f"{', '.join(changes)}"
+                )
+            else:
+                logger.debug("[설정 리로드] 리스크 파라미터 변경 없음")
+
+        except Exception as e:
+            logger.warning(
+                f"설정 리로드 실패 (기존 설정 유지): "
+                f"{type(e).__name__}: {e}"
             )
 
     # ─────────────────────────────────────
@@ -415,6 +505,9 @@ class TradingEngine:
         """
         try:
             logger.debug(f"--- 사이클 #{self._cycle_count} 시작 ---")
+
+            # Supabase 설정 리로드 (리스크 파라미터 동기화)
+            self._reload_settings_if_changed()
 
             # 매수 후보 리스트 초기화
             self._buy_candidates = []
