@@ -635,14 +635,13 @@ class TradingEngine:
                 )
 
         elif signal_result.signal == Signal.SELL:
-            # 보유 중인 경우에만 매도
-            sell_position = self._risk_manager.get_position(market)
-            if sell_position is not None:
-                record = self._order_manager.execute_sell(
-                    market, reason=signal_result.reason
-                )
-                if record and self._strategy:
-                    self._strategy.on_position_closed(market, record.pnl_pct)
+            # 전략 매도 신호 비활성화: 매도는 risk_manager(트레일링 스탑/손절/익절)만 담당
+            # 전략의 SELL 신호로 인한 조기 매도를 방지하여,
+            # risk_manager의 체계적인 리스크 관리에 매도를 일원화한다.
+            logger.info(
+                "[%s] 전략 매도 신호 무시 (risk_manager 전용): %s",
+                market, signal_result.reason,
+            )
 
     # ─────────────────────────────────────
     # 매수 후보 수집 및 동기화
