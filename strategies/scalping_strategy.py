@@ -5,22 +5,25 @@
 OR 로직 기반으로 여러 독립적인 진입 신호 중 하나라도 충족되면 매매를 실행한다.
 
 매수 조건 (하나만 충족해도 매수):
-  1. RSI 과매도 반등: 최근 3봉 내 RSI < oversold 이후 상승 전환
-  2. EMA 골든크로스: 단기 EMA가 장기 EMA를 상향 돌파
-  3. 볼린저 하단 반등: 최근 2봉 내 하단 터치 후 가격 상승
-  4. 거래량 급증 + 양봉: 거래량 SMA 대비 급증 + 종가 > 시가
+  1. RSI 과매도: RSI < oversold 자체가 매수 신호
+  2. EMA 골든크로스 또는 갭 축소: 상향 돌파 또는 하락 갭이 40% 이상 축소
+  3. 볼린저 하단 터치: 현재 봉의 저가가 하단 밴드 이하
+  4. 거래량 급증: 양봉 1.5x 이상 또는 음봉 2.25x 이상 (패닉셀 감지)
+  5. 연속 하락 둔화: 3봉 연속 음봉 + 하락폭 30% 이상 축소
 
 매도 조건 (하나만 충족해도 매도):
-  1. RSI 과매수 하락: 최근 3봉 내 RSI > overbought 이후 하락 전환
-  2. EMA 데드크로스: 단기 EMA가 장기 EMA를 하향 돌파
-  3. 볼린저 상단 이탈: 최근 2봉 내 상단 터치 후 가격 하락
-  4. 거래량 급증 + 음봉: 거래량 SMA 대비 급증 + 종가 < 시가
+  1. RSI 과매수: RSI > overbought 자체가 매도 신호
+  2. EMA 데드크로스 또는 갭 축소: 하향 돌파 또는 상승 갭이 40% 이상 축소
+  3. 볼린저 상단 터치: 현재 봉의 고가가 상단 밴드 이상
+  4. 거래량 급증: 음봉 1.5x 이상 또는 양봉 2.25x 이상 (차익실현 감지)
+  5. 연속 상승 둔화: 3봉 연속 양봉 + 상승폭 30% 이상 축소
 
 확신도:
-  - 충족 조건 1개: 0.4
-  - 충족 조건 2개: 0.6
-  - 충족 조건 3개: 0.8
-  - 충족 조건 4개: 0.95
+  - 충족 조건 1개: 0.35
+  - 충족 조건 2개: 0.55
+  - 충족 조건 3개: 0.75
+  - 충족 조건 4개: 0.85
+  - 충족 조건 5개: 0.95
 """
 
 from __future__ import annotations
@@ -37,10 +40,11 @@ logger = get_logger(__name__)
 
 # 충족 조건 수 → 확신도 매핑
 _CONFIDENCE_MAP = {
-    1: 0.4,
-    2: 0.6,
-    3: 0.8,
-    4: 0.95,
+    1: 0.35,
+    2: 0.55,
+    3: 0.75,
+    4: 0.85,
+    5: 0.95,
 }
 
 
@@ -181,8 +185,84 @@ class ScalpingStrategy(BaseStrategy):
             "current_price": current_price,
         }
 
-        # ── 신호 결정: 매수 우선 (OR 로직) ──
+        # ── 신호 결정: 매수/매도 동시 충족 시 reasons 수 비교 ──
+        if buy_reasons and sell_reasons:
+            if len(buy_reasons) > len(sell_reasons):
+                # 매수 조건이 더 많으면 매수 (최소 2개 필터 적용)
+                if len(buy_reasons) < 2:
+                    logger.info(
+                        "[%s] 매수 조건 부족 (최소 2개 필요, 현재 %d개). HOLD.",
+                        market, len(buy_reasons),
+                    )
+                    return SignalResult(
+                        signal=Signal.HOLD,
+                        market=market,
+                        confidence=0.0,
+                        reason=f"매수/매도 동시 충족, 매수 조건 부족 ({len(buy_reasons)}개 < 2)",
+                        metadata=metadata,
+                    )
+                count = len(buy_reasons)
+                confidence = _CONFIDENCE_MAP.get(count, 0.95)
+                reason = f"스캘핑 매수 ({count}개 조건): " + " | ".join(buy_reasons)
+                metadata["buy_conditions"] = buy_reasons
+                metadata["condition_count"] = count
+                logger.info(
+                    "[%s] 매수 신호 (매수/매도 동시, 매수 우세) - %s (confidence=%.2f)",
+                    market, reason, confidence,
+                )
+                return SignalResult(
+                    signal=Signal.BUY,
+                    market=market,
+                    confidence=confidence,
+                    reason=reason,
+                    metadata=metadata,
+                )
+            elif len(sell_reasons) > len(buy_reasons):
+                # 매도 조건이 더 많으면 매도 (매도는 최소 조건 필터 없음)
+                count = len(sell_reasons)
+                confidence = _CONFIDENCE_MAP.get(count, 0.95)
+                reason = f"스캘핑 매도 ({count}개 조건): " + " | ".join(sell_reasons)
+                metadata["sell_conditions"] = sell_reasons
+                metadata["condition_count"] = count
+                logger.info(
+                    "[%s] 매도 신호 (매수/매도 동시, 매도 우세) - %s (confidence=%.2f)",
+                    market, reason, confidence,
+                )
+                return SignalResult(
+                    signal=Signal.SELL,
+                    market=market,
+                    confidence=confidence,
+                    reason=reason,
+                    metadata=metadata,
+                )
+            else:
+                # 동수이면 HOLD
+                logger.info(
+                    "[%s] 매수/매도 동시 충족 동수 (%d개). HOLD.",
+                    market, len(buy_reasons),
+                )
+                return SignalResult(
+                    signal=Signal.HOLD,
+                    market=market,
+                    confidence=0.0,
+                    reason=f"매수/매도 동시 충족 동수 ({len(buy_reasons)}개)",
+                    metadata=metadata,
+                )
+
         if buy_reasons:
+            # 매수 최소 2개 조건 필터
+            if len(buy_reasons) < 2:
+                logger.info(
+                    "[%s] 매수 조건 부족 (최소 2개 필요, 현재 %d개). HOLD.",
+                    market, len(buy_reasons),
+                )
+                return SignalResult(
+                    signal=Signal.HOLD,
+                    market=market,
+                    confidence=0.0,
+                    reason=f"매수 조건 부족 ({len(buy_reasons)}개 < 2)",
+                    metadata=metadata,
+                )
             count = len(buy_reasons)
             confidence = _CONFIDENCE_MAP.get(count, 0.95)
             reason = f"스캘핑 매수 ({count}개 조건): " + " | ".join(buy_reasons)
@@ -250,22 +330,15 @@ class ScalpingStrategy(BaseStrategy):
         """매수 조건을 개별 평가하여 충족된 조건의 사유 리스트를 반환한다."""
         reasons: List[str] = []
 
-        # 1. RSI 과매도 반등: 최근 3봉 내 RSI < oversold 이후 상승 전환
-        if len(rsi_series) >= 4:
-            recent_rsi = rsi_series.iloc[-3:]  # 최근 3봉
-            was_oversold = any(
-                not pd.isna(v) and v < self._rsi_oversold
-                for v in recent_rsi.values
-            )
+        # 1. RSI 과매도: RSI < oversold 자체가 매수 신호
+        if len(rsi_series) >= 1:
             curr_rsi = rsi_series.iloc[-1]
-            prev_rsi = rsi_series.iloc[-2]
-            if was_oversold and not pd.isna(curr_rsi) and not pd.isna(prev_rsi):
-                if curr_rsi > prev_rsi:
-                    reasons.append(
-                        f"RSI 과매도 반등 (RSI: {prev_rsi:.1f}→{curr_rsi:.1f})"
-                    )
+            if not pd.isna(curr_rsi) and curr_rsi < self._rsi_oversold:
+                reasons.append(
+                    f"RSI 과매도 ({curr_rsi:.1f} < {self._rsi_oversold})"
+                )
 
-        # 2. EMA 골든크로스: 단기 EMA가 장기 EMA를 상향 돌파
+        # 2. EMA 골든크로스 또는 갭 축소
         if len(ema_fast) >= 2 and len(ema_slow) >= 2:
             curr_fast = ema_fast.iloc[-1]
             prev_fast = ema_fast.iloc[-2]
@@ -275,29 +348,31 @@ class ScalpingStrategy(BaseStrategy):
                 not pd.isna(curr_fast) and not pd.isna(prev_fast)
                 and not pd.isna(curr_slow) and not pd.isna(prev_slow)
             ):
+                # (a) 기존 골든크로스
                 if curr_fast > curr_slow and prev_fast <= prev_slow:
                     reasons.append(
                         f"EMA 골든크로스 ({self._ema_fast}/{self._ema_slow})"
                     )
+                # (b) 갭 축소: fast < slow이지만 갭이 40% 이상 축소
+                elif curr_fast < curr_slow and curr_slow > 0 and prev_slow > 0:
+                    prev_gap = (prev_slow - prev_fast) / prev_slow * 100
+                    curr_gap = (curr_slow - curr_fast) / curr_slow * 100
+                    if prev_gap > 0.1 and curr_gap < prev_gap * 0.6:
+                        reasons.append(
+                            f"EMA 갭 축소 ({prev_gap:.2f}%→{curr_gap:.2f}%)"
+                        )
 
-        # 3. 볼린저 하단 반등: 최근 2봉 내 하단 터치 후 가격 상승
-        if len(bb_lower) >= 2 and len(df) >= 2:
-            for i in [-2, -1]:
-                low_val = df["low"].iloc[i]
-                lower_val = bb_lower.iloc[i]
-                if not pd.isna(low_val) and not pd.isna(lower_val):
-                    if low_val <= lower_val:
-                        # 하단 터치 확인 → 현재 종가가 이전 종가보다 높은지
-                        curr_close = df["close"].iloc[-1]
-                        prev_close = df["close"].iloc[-2]
-                        if (
-                            not pd.isna(curr_close) and not pd.isna(prev_close)
-                            and curr_close > prev_close
-                        ):
-                            reasons.append("볼린저 하단 반등")
-                            break
+        # 3. 볼린저 하단 터치: 현재 봉의 저가가 하단 밴드 이하
+        if len(bb_lower) >= 1 and len(df) >= 1:
+            curr_low = df["low"].iloc[-1]
+            curr_lower = bb_lower.iloc[-1]
+            if not pd.isna(curr_low) and not pd.isna(curr_lower) and curr_low <= curr_lower:
+                pct_below = (curr_lower - curr_low) / curr_lower * 100 if curr_lower > 0 else 0
+                reasons.append(
+                    f"볼린저 하단 터치 (이탈: {pct_below:.1f}%)"
+                )
 
-        # 4. 거래량 급증 + 양봉: 거래량 > surge_ratio * SMA, 종가 > 시가
+        # 4. 거래량 급증: 양봉 1.5x 또는 음봉 2.25x 이상
         if len(volume_sma) >= 1 and len(df) >= 1:
             curr_volume = df["volume"].iloc[-1]
             curr_vol_sma = volume_sma.iloc[-1]
@@ -308,14 +383,36 @@ class ScalpingStrategy(BaseStrategy):
                 and not pd.isna(curr_close) and not pd.isna(curr_open)
                 and curr_vol_sma > 0
             ):
-                if (
-                    curr_volume > self._volume_surge_ratio * curr_vol_sma
-                    and curr_close > curr_open
-                ):
-                    ratio = curr_volume / curr_vol_sma
-                    reasons.append(
-                        f"거래량 급증 양봉 (vol ratio: {ratio:.1f}x)"
-                    )
+                ratio = curr_volume / curr_vol_sma
+                if curr_close > curr_open:
+                    if ratio > self._volume_surge_ratio:
+                        reasons.append(
+                            f"거래량 급증 양봉 (vol: {ratio:.1f}x)"
+                        )
+                else:
+                    if ratio > self._volume_surge_ratio * 1.5:
+                        reasons.append(
+                            f"거래량 급증 음봉 (vol: {ratio:.1f}x, 패닉셀 감지)"
+                        )
+
+        # 5. 연속 하락 둔화: 3봉 연속 음봉 + 하락폭 30% 이상 축소
+        if len(df) >= 4:
+            is_bearish = [
+                df["close"].iloc[i] < df["open"].iloc[i] for i in [-3, -2, -1]
+            ]
+            if all(is_bearish):
+                drop_prev = abs(df["close"].iloc[-2] - df["open"].iloc[-2])
+                drop_curr = abs(df["close"].iloc[-1] - df["open"].iloc[-1])
+                if drop_prev > 0 and drop_curr < drop_prev * 0.7:
+                    open_3 = df["open"].iloc[-3]
+                    if open_3 > 0:
+                        total_drop_pct = (
+                            (df["close"].iloc[-1] - open_3)
+                            / open_3 * 100
+                        )
+                        reasons.append(
+                            f"연속 하락 둔화 (3봉 음봉, 총 {total_drop_pct:.1f}%)"
+                        )
 
         return reasons
 
@@ -335,22 +432,15 @@ class ScalpingStrategy(BaseStrategy):
         """매도 조건을 개별 평가하여 충족된 조건의 사유 리스트를 반환한다."""
         reasons: List[str] = []
 
-        # 1. RSI 과매수 하락: 최근 3봉 내 RSI > overbought 이후 하락 전환
-        if len(rsi_series) >= 4:
-            recent_rsi = rsi_series.iloc[-3:]  # 최근 3봉
-            was_overbought = any(
-                not pd.isna(v) and v > self._rsi_overbought
-                for v in recent_rsi.values
-            )
+        # 1. RSI 과매수: RSI > overbought 자체가 매도 신호
+        if len(rsi_series) >= 1:
             curr_rsi = rsi_series.iloc[-1]
-            prev_rsi = rsi_series.iloc[-2]
-            if was_overbought and not pd.isna(curr_rsi) and not pd.isna(prev_rsi):
-                if curr_rsi < prev_rsi:
-                    reasons.append(
-                        f"RSI 과매수 하락 (RSI: {prev_rsi:.1f}→{curr_rsi:.1f})"
-                    )
+            if not pd.isna(curr_rsi) and curr_rsi > self._rsi_overbought:
+                reasons.append(
+                    f"RSI 과매수 ({curr_rsi:.1f} > {self._rsi_overbought})"
+                )
 
-        # 2. EMA 데드크로스: 단기 EMA가 장기 EMA를 하향 돌파
+        # 2. EMA 데드크로스 또는 갭 축소 (상승 둔화)
         if len(ema_fast) >= 2 and len(ema_slow) >= 2:
             curr_fast = ema_fast.iloc[-1]
             prev_fast = ema_fast.iloc[-2]
@@ -360,29 +450,31 @@ class ScalpingStrategy(BaseStrategy):
                 not pd.isna(curr_fast) and not pd.isna(prev_fast)
                 and not pd.isna(curr_slow) and not pd.isna(prev_slow)
             ):
+                # (a) 기존 데드크로스
                 if curr_fast < curr_slow and prev_fast >= prev_slow:
                     reasons.append(
                         f"EMA 데드크로스 ({self._ema_fast}/{self._ema_slow})"
                     )
+                # (b) 갭 축소: fast > slow이지만 갭이 40% 이상 축소 (상승 둔화)
+                elif curr_fast > curr_slow and curr_slow > 0 and prev_slow > 0:
+                    prev_gap = (prev_fast - prev_slow) / prev_slow * 100
+                    curr_gap = (curr_fast - curr_slow) / curr_slow * 100
+                    if prev_gap > 0.1 and curr_gap < prev_gap * 0.6:
+                        reasons.append(
+                            f"EMA 갭 축소 ({prev_gap:.2f}%→{curr_gap:.2f}%)"
+                        )
 
-        # 3. 볼린저 상단 이탈: 최근 2봉 내 상단 터치 후 가격 하락
-        if len(bb_upper) >= 2 and len(df) >= 2:
-            for i in [-2, -1]:
-                high_val = df["high"].iloc[i]
-                upper_val = bb_upper.iloc[i]
-                if not pd.isna(high_val) and not pd.isna(upper_val):
-                    if high_val >= upper_val:
-                        # 상단 터치 확인 → 현재 종가가 이전 종가보다 낮은지
-                        curr_close = df["close"].iloc[-1]
-                        prev_close = df["close"].iloc[-2]
-                        if (
-                            not pd.isna(curr_close) and not pd.isna(prev_close)
-                            and curr_close < prev_close
-                        ):
-                            reasons.append("볼린저 상단 이탈")
-                            break
+        # 3. 볼린저 상단 터치: 현재 봉의 고가가 상단 밴드 이상
+        if len(bb_upper) >= 1 and len(df) >= 1:
+            curr_high = df["high"].iloc[-1]
+            curr_upper = bb_upper.iloc[-1]
+            if not pd.isna(curr_high) and not pd.isna(curr_upper) and curr_high >= curr_upper:
+                pct_above = (curr_high - curr_upper) / curr_upper * 100 if curr_upper > 0 else 0
+                reasons.append(
+                    f"볼린저 상단 터치 (이탈: {pct_above:.1f}%)"
+                )
 
-        # 4. 거래량 급증 + 음봉: 거래량 > surge_ratio * SMA, 종가 < 시가
+        # 4. 거래량 급증: 음봉 1.5x 또는 양봉 2.25x 이상 (차익실현 감지)
         if len(volume_sma) >= 1 and len(df) >= 1:
             curr_volume = df["volume"].iloc[-1]
             curr_vol_sma = volume_sma.iloc[-1]
@@ -393,13 +485,35 @@ class ScalpingStrategy(BaseStrategy):
                 and not pd.isna(curr_close) and not pd.isna(curr_open)
                 and curr_vol_sma > 0
             ):
-                if (
-                    curr_volume > self._volume_surge_ratio * curr_vol_sma
-                    and curr_close < curr_open
-                ):
-                    ratio = curr_volume / curr_vol_sma
-                    reasons.append(
-                        f"거래량 급증 음봉 (vol ratio: {ratio:.1f}x)"
-                    )
+                ratio = curr_volume / curr_vol_sma
+                if curr_close < curr_open:
+                    if ratio > self._volume_surge_ratio:
+                        reasons.append(
+                            f"거래량 급증 음봉 (vol: {ratio:.1f}x)"
+                        )
+                else:
+                    if ratio > self._volume_surge_ratio * 1.5:
+                        reasons.append(
+                            f"거래량 급증 양봉 (vol: {ratio:.1f}x, 차익실현 감지)"
+                        )
+
+        # 5. 연속 상승 둔화: 3봉 연속 양봉 + 상승폭 30% 이상 축소
+        if len(df) >= 4:
+            is_bullish = [
+                df["close"].iloc[i] > df["open"].iloc[i] for i in [-3, -2, -1]
+            ]
+            if all(is_bullish):
+                rise_prev = abs(df["close"].iloc[-2] - df["open"].iloc[-2])
+                rise_curr = abs(df["close"].iloc[-1] - df["open"].iloc[-1])
+                if rise_prev > 0 and rise_curr < rise_prev * 0.7:
+                    open_3 = df["open"].iloc[-3]
+                    if open_3 > 0:
+                        total_rise_pct = (
+                            (df["close"].iloc[-1] - open_3)
+                            / open_3 * 100
+                        )
+                        reasons.append(
+                            f"연속 상승 둔화 (3봉 양봉, 총 +{total_rise_pct:.1f}%)"
+                        )
 
         return reasons
