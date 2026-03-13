@@ -40,9 +40,9 @@ trading:
     - KRW-USDC
     - KRW-SHIB
   # 시세 조회 간격 (초) - 메인 루프 대기 시간
-  poll_interval: 180
+  poll_interval: 60
   # 캔들 기준 시간프레임 ("minute1", "minute5", "minute15", "minute60", "day")
-  timeframe: "minute15"
+  timeframe: "minute5"
   # 캔들 조회 개수 (지표 계산에 필요한 과거 데이터 수)
   candle_count: 200
 
@@ -62,9 +62,9 @@ investment:
 # -------------------------------------------------------------
 risk:
   # 손절 비율 (%) - 매수가 대비 이 비율 이상 하락 시 손절
-  stop_loss_pct: 3.0
+  stop_loss_pct: 1.5
   # 익절 비율 (%) - 매수가 대비 이 비율 이상 상승 시 익절
-  take_profit_pct: 5.0
+  take_profit_pct: 2.0
   # 일일 최대 손실 금액 (KRW) - 이 금액 초과 시 당일 거래 중단
   max_daily_loss: 50000
   # 최대 동시 보유 종목 수
@@ -72,14 +72,14 @@ risk:
   # 트레일링 스탑 사용 여부
   trailing_stop_enabled: true
   # 트레일링 스탑 비율 (%) - 고점 대비 이 비율 하락 시 매도
-  trailing_stop_pct: 2.0
+  trailing_stop_pct: 1.0
 
 # -------------------------------------------------------------
 # 전략 설정
 # -------------------------------------------------------------
 strategy:
-  # 활성 전략 이름 ("rsi", "ma_cross", "bollinger", "ross_cameron")
-  active: "ross_cameron"
+  # 활성 전략 이름 ("rsi", "ma_cross", "bollinger", "ross_cameron", "scalping")
+  active: "scalping"
 
   # RSI 전략 파라미터
   rsi:
@@ -115,6 +115,17 @@ strategy:
     macd_signal_period: 9         # MACD 시그널 기간
     buy_risk_reward_ratio: 2.0    # 매수 시 리스크/보상 비율
     sell_risk_reward_ratio: 1.0   # 매도 시 리스크/보상 비율
+
+  # 스캘핑 전략 파라미터 (빈번한 소규모 거래)
+  scalping:
+    rsi_period: 7               # RSI 계산 기간 (짧을수록 민감)
+    rsi_oversold: 35            # RSI 과매도 기준 (완화)
+    rsi_overbought: 65          # RSI 과매수 기준 (완화)
+    ema_fast: 3                 # 빠른 EMA 기간
+    ema_slow: 10                # 느린 EMA 기간
+    bb_period: 15               # 볼린저밴드 기간
+    bb_std_dev: 2.0             # 볼린저밴드 표준편차
+    volume_surge_ratio: 1.5     # 거래량 급등 배율 (평균 대비)
 
 # -------------------------------------------------------------
 # 백테스팅 설정

@@ -274,10 +274,23 @@ class TradingEngine:
                 buy_risk_reward_ratio=cfg.buy_risk_reward_ratio,
                 sell_risk_reward_ratio=cfg.sell_risk_reward_ratio,
             )
+        elif name == "scalping":
+            from strategies.scalping_strategy import ScalpingStrategy
+            cfg = strategy_cfg.scalping
+            strategy = ScalpingStrategy(
+                rsi_period=cfg.rsi_period,
+                rsi_oversold=cfg.rsi_oversold,
+                rsi_overbought=cfg.rsi_overbought,
+                ema_fast=cfg.ema_fast,
+                ema_slow=cfg.ema_slow,
+                bb_period=cfg.bb_period,
+                bb_std_dev=cfg.bb_std_dev,
+                volume_surge_ratio=cfg.volume_surge_ratio,
+            )
         else:
             raise ValueError(
                 f"알 수 없는 전략: '{name}'. "
-                f"유효한 전략: rsi, ma_cross, bollinger, ross_cameron"
+                f"유효한 전략: rsi, ma_cross, bollinger, ross_cameron, scalping"
             )
 
         logger.info(f"전략 선택: {strategy.name}")

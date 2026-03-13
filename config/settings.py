@@ -103,6 +103,19 @@ class RossCameronStrategyConfig:
 
 
 @dataclass
+class ScalpingStrategyConfig:
+    """스캘핑 전략 파라미터"""
+    rsi_period: int = 7
+    rsi_oversold: float = 35
+    rsi_overbought: float = 65
+    ema_fast: int = 3
+    ema_slow: int = 10
+    bb_period: int = 15
+    bb_std_dev: float = 2.0
+    volume_surge_ratio: float = 1.5
+
+
+@dataclass
 class StrategyConfig:
     """전략 설정"""
     active: str = "rsi"
@@ -110,6 +123,7 @@ class StrategyConfig:
     ma_cross: MACrossStrategyConfig = field(default_factory=MACrossStrategyConfig)
     bollinger: BollingerStrategyConfig = field(default_factory=BollingerStrategyConfig)
     ross_cameron: RossCameronStrategyConfig = field(default_factory=RossCameronStrategyConfig)
+    scalping: ScalpingStrategyConfig = field(default_factory=ScalpingStrategyConfig)
 
 
 @dataclass
@@ -228,6 +242,9 @@ class Settings:
             ),
             ross_cameron=self._load_dataclass(
                 RossCameronStrategyConfig, strat_raw.get("ross_cameron", {})
+            ),
+            scalping=self._load_dataclass(
+                ScalpingStrategyConfig, strat_raw.get("scalping", {})
             ),
         )
 
@@ -382,7 +399,7 @@ class Settings:
             )
 
         # ── 전략 검증 ──
-        valid_strategies = {"rsi", "ma_cross", "bollinger", "ross_cameron"}
+        valid_strategies = {"rsi", "ma_cross", "bollinger", "ross_cameron", "scalping"}
         if self.strategy.active not in valid_strategies:
             errors.append(
                 f"[설정 오류] 알 수 없는 전략: '{self.strategy.active}'. "

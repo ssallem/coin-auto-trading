@@ -86,6 +86,19 @@ def create_strategy(settings: Settings, strategy_name: str | None = None):
             buy_risk_reward_ratio=cfg.buy_risk_reward_ratio,
             sell_risk_reward_ratio=cfg.sell_risk_reward_ratio,
         )
+    elif active == "scalping":
+        from strategies.scalping_strategy import ScalpingStrategy
+        cfg = settings.strategy.scalping
+        return ScalpingStrategy(
+            rsi_period=cfg.rsi_period,
+            rsi_oversold=cfg.rsi_oversold,
+            rsi_overbought=cfg.rsi_overbought,
+            ema_fast=cfg.ema_fast,
+            ema_slow=cfg.ema_slow,
+            bb_period=cfg.bb_period,
+            bb_std_dev=cfg.bb_std_dev,
+            volume_surge_ratio=cfg.volume_surge_ratio,
+        )
     else:
         raise ValueError(f"알 수 없는 전략: {active}")
 
@@ -441,7 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--strategy",
         type=str,
         default=None,
-        choices=["rsi", "ma_cross", "bollinger", "ross_cameron"],
+        choices=["rsi", "ma_cross", "bollinger", "ross_cameron", "scalping"],
         help="사용할 전략 (기본: config에서 읽음)",
     )
     bt_parser.add_argument(
