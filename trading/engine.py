@@ -22,7 +22,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -81,6 +81,9 @@ class TradingEngine:
 
         # 매수 후보 수집용 리스트 (사이클마다 초기화)
         self._buy_candidates: List[Dict] = []
+
+        # 잠금 코인 목록 (매도 차단)
+        self._locked_markets: Set[str] = set()
 
         # ── Notifier 초기화 ──
         init_notifier(settings)
@@ -304,11 +307,31 @@ class TradingEngine:
             else:
                 logger.debug("[설정 리로드] 리스크 파라미터 변경 없음")
 
+            # 잠금 코인 목록 갱신
+            try:
+                self._locked_markets = self._sync.fetch_locked_coins()
+                if self._locked_markets:
+                    logger.info(
+                        f"[설정 리로드] 잠금 코인: {self._locked_markets}"
+                    )
+            except Exception as lock_err:
+                logger.warning(
+                    f"잠금 코인 조회 실패 (기존 목록 유지): {lock_err}"
+                )
+
         except Exception as e:
             logger.warning(
                 f"설정 리로드 실패 (기존 설정 유지): "
                 f"{type(e).__name__}: {e}"
             )
+
+    # ─────────────────────────────────────
+    # 코인 잠금
+    # ─────────────────────────────────────
+
+    def _is_market_locked(self, market: str) -> bool:
+        """해당 마켓이 잠금 상태인지 확인한다."""
+        return market in self._locked_markets
 
     # ─────────────────────────────────────
     # 전략 관리
@@ -575,7 +598,14 @@ class TradingEngine:
 
         # 4. 보유 포지션 리스크 체크 (손절/익절/트레일링 스탑)
         position = self._risk_manager.get_position(market)
-        if position is not None:
+        is_locked = self._is_market_locked(market)
+
+        if position is not None and is_locked:
+            logger.info(
+                f"[{market}] 잠금 상태 — 매도 스킵 (손절/익절/트레일링 포함)"
+            )
+
+        if position is not None and not is_locked:
             action = self._risk_manager.check_position(market, current_price)
             if action is not None:
                 # 리스크 이벤트 발동 → 자동 매도

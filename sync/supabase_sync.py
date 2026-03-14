@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import requests
 
@@ -301,6 +301,41 @@ class SupabaseSync:
     # ─────────────────────────────────────
     # 매수 후보 (buy_candidates)
     # ─────────────────────────────────────
+
+    def fetch_locked_coins(self) -> Set[str]:
+        """
+        coin_locks 테이블에서 is_locked=true인 마켓 목록을 조회한다.
+
+        Returns:
+            잠금된 마켓 코드 집합 (예: {"KRW-BTC", "KRW-ETH"}).
+            비활성 상태이거나 오류 시 빈 set.
+        """
+        if not self.enabled:
+            return set()
+
+        try:
+            resp = requests.get(
+                f"{self._url}/rest/v1/coin_locks",
+                headers={
+                    "apikey": self._key,
+                    "Authorization": f"Bearer {self._key}",
+                    "Content-Type": "application/json",
+                },
+                params={
+                    "is_locked": "eq.true",
+                    "select": "market",
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+            locked = {row["market"] for row in rows if row.get("market")}
+            if locked:
+                logger.debug(f"잠금 코인 {len(locked)}건 조회됨: {locked}")
+            return locked
+        except Exception as e:
+            logger.warning(f"잠금 코인 조회 실패 (무시): {e}")
+            return set()
 
     def push_buy_candidates(self, candidates: List[Dict[str, Any]]) -> bool:
         """
